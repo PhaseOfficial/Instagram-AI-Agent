@@ -42,6 +42,30 @@ export const getInstagramCommentSchema = (): InstagramCommentSchema => {
     };
 };
 
+export const getTweetSchema = (): JsonSchema => {
+    return {
+        description: "A tweet that is engaging and fits the character's style.",
+        type: "object",
+        properties: {
+            content: {
+                type: "string",
+                description: "The main text content of the tweet (max 280 characters).",
+                nullable: false,
+            },
+            hashtags: {
+                type: "array",
+                items: { type: "string" },
+                description: "Relevant hashtags for the tweet.",
+            },
+            viralPotential: {
+                type: "number",
+                description: "Predicted viral potential from 0 to 100.",
+            }
+        },
+        required: ["content"]
+    };
+};
+
 
 
 // Define the interface for the Tweet document

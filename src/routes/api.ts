@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import { getIgClient, closeIgClient, scrapeFollowersHandler, getIgClientStatus, getIgClientsSnapshot } from '../client/Instagram';
+import { getXClient } from '../client/Twitter';
 import { getPosterClient } from '../client/InstagramPoster';
 import logger from '../config/logger';
 import mongoose from 'mongoose';
@@ -38,12 +39,15 @@ router.get('/status', (_req: Request, res: Response) => {
     return res.json(status);
 });
 
+import { getRunSummary } from '../utils/runSummary';
+
 // Health endpoint
 router.get('/health', (req: Request, res: Response) => {
   const accountQuery = typeof req.query.account === 'string' ? req.query.account : null;
   const allQuery = req.query.all === '1' || req.query.all === 'true';
   const accountsMap = getAccountsMap();
   const accountKeys = new Set<string>(['default', ...Object.keys(accountsMap || {})]);
+  const xClient = getXClient();
 
   if (accountQuery) {
     return res.json({
@@ -52,8 +56,10 @@ router.get('/health', (req: Request, res: Response) => {
       accountConfigured: !!accountsMap?.[accountQuery],
       igClient: getIgClientStatus(accountQuery),
       igClients: getIgClientsSnapshot(),
+      xClient: { initialized: !!xClient },
       geminiKeys: geminiApiKeys.length,
       lastIgRun: getLastRunSummary(),
+      lastXRun: getRunSummary('twitter'),
     });
   }
 
@@ -69,9 +75,11 @@ router.get('/health', (req: Request, res: Response) => {
       dbConnected: mongoose.connection.readyState === 1,
       igClient: getIgClientStatus('default'),
       igClients: getIgClientsSnapshot(),
+      xClient: { initialized: !!xClient },
       accounts: perAccount,
       geminiKeys: geminiApiKeys.length,
       lastIgRun: getLastRunSummary(),
+      lastXRun: getRunSummary('twitter'),
     });
   }
 
@@ -79,9 +87,11 @@ router.get('/health', (req: Request, res: Response) => {
     dbConnected: mongoose.connection.readyState === 1,
     igClient: getIgClientStatus('default'),
     igClients: getIgClientsSnapshot(),
+    xClient: { initialized: !!xClient },
     accounts: Array.from(accountKeys),
     geminiKeys: geminiApiKeys.length,
     lastIgRun: getLastRunSummary(),
+    lastXRun: getRunSummary('twitter'),
   });
 });
 
@@ -530,6 +540,87 @@ router.post('/cooldown', async (req: Request, res: Response) => {
       error: getErrorMessage(error),
     });
     return res.status(500).json({ error: 'Failed to set cooldown' });
+  }
+});
+
+// --- Twitter/X Routes ---
+
+router.post('/x/tweet', async (req: Request, res: Response) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'Content is required' });
+    const xClient = getXClient();
+    const result = await xClient.postTweet(content);
+    await logAction({
+      platform: 'twitter',
+      action: 'tweet',
+      status: 'success',
+      account: 'default',
+      details: { content }
+    });
+    return res.json({ success: true, result });
+  } catch (error) {
+    logger.error('X tweet error:', error);
+    await logAction({
+      platform: 'twitter',
+      action: 'tweet',
+      status: 'error',
+      account: 'default',
+      error: getErrorMessage(error)
+    });
+    return res.status(500).json({ error: 'Failed to post tweet' });
+  }
+});
+
+router.post('/x/generate-tweet', async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body;
+    const xClient = getXClient();
+    const result = await xClient.generateAndPostTweet(prompt);
+    await logAction({
+      platform: 'twitter',
+      action: 'generate-tweet',
+      status: 'success',
+      account: 'default'
+    });
+    return res.json({ success: true, result });
+  } catch (error) {
+    logger.error('X generate tweet error:', error);
+    await logAction({
+      platform: 'twitter',
+      action: 'generate-tweet',
+      status: 'error',
+      account: 'default',
+      error: getErrorMessage(error)
+    });
+    return res.status(500).json({ error: 'Failed to generate/post tweet' });
+  }
+});
+
+router.post('/x/like', async (req: Request, res: Response) => {
+  try {
+    const { tweetId } = req.body;
+    if (!tweetId) return res.status(400).json({ error: 'tweetId is required' });
+    const xClient = getXClient();
+    await xClient.likeTweet(tweetId);
+    await logAction({
+      platform: 'twitter',
+      action: 'like',
+      status: 'success',
+      account: 'default',
+      details: { tweetId }
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    logger.error('X like error:', error);
+    await logAction({
+      platform: 'twitter',
+      action: 'like',
+      status: 'error',
+      account: 'default',
+      error: getErrorMessage(error)
+    });
+    return res.status(500).json({ error: 'Failed to like tweet' });
   }
 });
 
